@@ -1,0 +1,58 @@
+syntax = "proto3";
+package adapt.v1;
+option go_package = "adapt/proto/adapt/v1";
+
+service AdDecisionService {
+  rpc Decide(AdRequest) returns (AdResponse);
+  rpc GetBudgetStatus(BudgetQuery) returns (BudgetStatus);
+}
+
+message AdRequest {
+  string request_id = 1;
+  string user_id = 2;
+  string publisher_domain = 3;
+  string device_type = 4;       // mobile, desktop, tablet
+  string geo_country = 5;
+  string geo_region = 6;
+  int32 num_slots = 7;          // number of ad slots to fill
+  int64 timestamp_ms = 8;
+}
+
+message AdResponse {
+  string request_id = 1;
+  repeated AdDecision decisions = 2;
+  LatencyBreakdown latency = 3;
+}
+
+message AdDecision {
+  string ad_id = 1;
+  string campaign_id = 2;
+  string creative_url = 3;
+  double bid_price = 4;
+  double clearing_price = 5;
+  double predicted_ctr = 6;
+  double predicted_cvr = 7;
+  double ecpm = 8;
+  int32 rank_position = 9;
+}
+
+message LatencyBreakdown {
+  double total_ms = 1;
+  double feature_fetch_ms = 2;
+  double ann_retrieval_ms = 3;
+  double ranking_ms = 4;
+  double auction_ms = 5;
+}
+
+message BudgetQuery {
+  string campaign_id = 1;
+}
+
+message BudgetStatus {
+  string campaign_id = 1;
+  double daily_budget = 2;
+  double spent_today = 3;
+  double remaining = 4;
+  double spend_rate_per_hour = 5;
+  double bid_multiplier = 6;    // current PID output
+}

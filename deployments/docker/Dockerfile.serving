@@ -1,0 +1,38 @@
+# ==============================================================================
+# ADAPT Serving Engine (Rust) Dockerfile
+# Cross-platform development image with hot reloading via cargo-watch
+# ==============================================================================
+FROM rust:1-slim-bookworm
+
+# Install build dependencies for C/C++ bindings (librdkafka, onnxruntime, tonic/protoc)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    pkg-config \
+    libssl-dev \
+    libcurl4-openssl-dev \
+    protobuf-compiler \
+    libclang-dev \
+    curl \
+    ca-certificates \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install cargo-binstall and precompiled cargo-watch for rapid hot-reloading
+RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash && \
+    cargo binstall --no-confirm cargo-watch
+
+WORKDIR /app
+
+# Point cargo target directory to isolated path (mounted to a named volume)
+# This prevents host-container cross-compilation conflicts and filesystem virtualization lag
+ENV CARGO_TARGET_DIR=/app/serving/target
+ENV RUST_LOG=info
+
+# Default development command with hot reload on file changes
+CMD ["cargo", "watch", "-c", \
+     "-w", "serving/src", \
+     "-w", "configs", \
+     "-w", "proto", \
+     "-x", "run --manifest-path serving/Cargo.toml --bin adapt-serving -- --config /app/configs/docker.yaml"]
+

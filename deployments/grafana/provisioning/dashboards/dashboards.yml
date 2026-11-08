@@ -1,0 +1,12 @@
+apiVersion: 1
+
+providers:
+  - name: 'ADAPT Dashboards'
+    orgId: 1
+    folder: 'ADAPT'
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /var/lib/grafana/dashboards
+

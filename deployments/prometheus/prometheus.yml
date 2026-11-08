@@ -1,0 +1,10 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: 'adapt-serving'
+    static_configs:
+      # Scrapes container if running inside Docker network, and host if running natively
+      - targets: ['adapt-serving:9091', 'host.docker.internal:9091']
+        labels:
+          service: 'adapt-serving-engine'

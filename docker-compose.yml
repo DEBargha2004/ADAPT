@@ -1,0 +1,248 @@
+# ==============================================================================
+# ADAPT (Adaptive Decision & Auction Platform for Targeting)
+# Master Docker Compose Specification (Single Source of Truth)
+# ==============================================================================
+name: adapt
+
+services:
+  # ----------------------------------------------------------------------------
+  # 1. Redis: In-Memory Online Feature Store & Budget Counters
+  # ----------------------------------------------------------------------------
+  redis:
+    image: redis:7.2.4-alpine
+    container_name: adapt-redis
+    command: [
+      "redis-server",
+      "--maxmemory", "2gb",
+      "--maxmemory-policy", "noeviction",
+      "--appendonly", "yes",
+      "--appendfsync", "everysec"
+    ]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 2s
+    restart: unless-stopped
+    networks:
+      - adapt-net
+
+  # ----------------------------------------------------------------------------
+  # 2. Redpanda: Kafka-Compatible Ultra-Low Latency Streaming Broker
+  # ----------------------------------------------------------------------------
+  redpanda:
+    image: redpandadata/redpanda:v23.3.14
+    container_name: adapt-redpanda
+    command:
+      - redpanda
+      - start
+      - --smp 1
+      - --memory 1G
+      - --overprovisioned
+      - --kafka-addr internal://0.0.0.0:29092,external://0.0.0.0:9092
+      - --advertise-kafka-addr internal://redpanda:29092,external://localhost:9092
+      - --pandaproxy-addr 0.0.0.0:8082
+      - --advertise-pandaproxy-addr redpanda:8082
+    ports:
+      - "127.0.0.1:9092:9092"   # Kafka API (external host access)
+      - "127.0.0.1:8082:8082"   # Pandaproxy REST
+      - "127.0.0.1:9644:9644"   # Redpanda Admin API
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -i healthy || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+    networks:
+      - adapt-net
+
+  # ----------------------------------------------------------------------------
+  # 3. Redpanda Console: Interactive Topic & Consumer Management UI
+  # ----------------------------------------------------------------------------
+  redpanda-console:
+    image: redpandadata/console:v2.5.2
+    container_name: adapt-redpanda-console
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    environment:
+      - KAFKA_BROKERS=redpanda:29092
+    ports:
+      - "127.0.0.1:8080:8080"
+    restart: unless-stopped
+    networks:
+      - adapt-net
+
+  # ----------------------------------------------------------------------------
+  # 4. Serving Engine (Rust): Hot-Path Ad Decision Engine (< 50ms p99 SLA)
+  # ----------------------------------------------------------------------------
+  serving:
+    profiles: ["container"]
+    build:
+      context: .
+      dockerfile: deployments/docker/Dockerfile.serving
+    container_name: adapt-serving
+    depends_on:
+      redis:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:50051:50051" # gRPC AdDecisionService
+      - "127.0.0.1:9091:9091"   # Prometheus metrics exporter
+    environment:
+      - RUST_LOG=info
+      - ADAPT_CONFIG=/app/configs/docker.yaml
+      - REDIS_URL=redis://redis:6379
+      - KAFKA_BROKER=redpanda:29092
+    volumes:
+      - ./serving:/app/serving:rw
+      - ./configs:/app/configs:ro
+      - ./proto:/app/proto:ro
+      - ./models:/app/models:rw
+      - serving-target:/app/serving/target
+      - cargo-cache:/usr/local/cargo/registry
+      - cargo-git:/usr/local/cargo/git
+    networks:
+      - adapt-net
+
+  # ----------------------------------------------------------------------------
+  # 5. Streaming Engine (Rust): Real-Time Feature Aggregators
+  # ----------------------------------------------------------------------------
+  streaming:
+    profiles: ["container"]
+    build:
+      context: .
+      dockerfile: deployments/docker/Dockerfile.streaming
+    container_name: adapt-streaming
+    depends_on:
+      redis:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    environment:
+      - RUST_LOG=info
+      - ADAPT_CONFIG=/app/configs/docker.yaml
+      - REDIS_URL=redis://redis:6379
+      - KAFKA_BROKER=redpanda:29092
+    volumes:
+      - ./streaming:/app/streaming:rw
+      - ./configs:/app/configs:ro
+      - streaming-target:/app/streaming/target
+      - cargo-cache:/usr/local/cargo/registry
+      - cargo-git:/usr/local/cargo/git
+    networks:
+      - adapt-net
+
+  # ----------------------------------------------------------------------------
+  # 6. ML Engine (Python): Offline Training, Point-in-Time Joins & Calibration
+  # ----------------------------------------------------------------------------
+  ml:
+    profiles: ["container"]
+    build:
+      context: .
+      dockerfile: deployments/docker/Dockerfile.ml
+    container_name: adapt-ml
+    depends_on:
+      redis:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8888:8888" # Optional Jupyter Lab interface
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app
+      - REDIS_URL=redis://redis:6379
+      - KAFKA_BROKER=redpanda:29092
+      - SERVING_HOST=adapt-serving:50051
+    volumes:
+      - ./ml:/app/ml:rw
+      - ./configs:/app/configs:ro
+      - ./proto:/app/proto:ro
+      - ./models:/app/models:rw
+      - ./ml/data:/app/ml/data:rw
+      - pip-cache:/root/.cache/pip
+    command: ["watch"]
+    networks:
+      - adapt-net
+
+  # ----------------------------------------------------------------------------
+  # 7. Prometheus: Metrics Collection & Time-Series Storage
+  # ----------------------------------------------------------------------------
+  prometheus:
+    profiles: ["obs"]
+    image: prom/prometheus:v2.51.0
+    container_name: adapt-prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./deployments/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    networks:
+      - adapt-net
+
+  # ----------------------------------------------------------------------------
+  # 8. Grafana: Performance, Latency & Calibration Dashboards
+  # ----------------------------------------------------------------------------
+  grafana:
+    profiles: ["obs"]
+    image: grafana/grafana:10.4.1
+    container_name: adapt-grafana
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./deployments/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./deployments/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./deployments/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks:
+      - adapt-net
+
+# ==============================================================================
+# Persistent Named Volumes
+# ==============================================================================
+volumes:
+  redis-data:
+    driver: local
+  redpanda-data:
+    driver: local
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local
+  serving-target:
+    driver: local
+  streaming-target:
+    driver: local
+  cargo-cache:
+    driver: local
+  cargo-git:
+    driver: local
+  pip-cache:
+    driver: local
+
+# ==============================================================================
+# Network
+# ==============================================================================
+networks:
+  adapt-net:
+    name: adapt-net
+    driver: bridge

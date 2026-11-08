@@ -1,0 +1,64 @@
+# ADAPT Docker Development Configuration
+server:
+  host: "0.0.0.0"
+  port: 50051
+  max_concurrent_requests: 512
+
+latency_budgets_ms:
+  feature_fetch: 8
+  ann_retrieval: 10
+  ranking_inference: 20
+  auction_resolution: 5
+  total_sla: 50
+
+redis:
+  url: "redis://redis:6379"
+  pool_size: 16
+  command_timeout_ms: 5
+
+retrieval:
+  index_path: "/app/models/ann_index.hnsw"
+  top_k: 500
+  ef_search: 128           # HNSW search parameter
+  embedding_dim: 64        # Portfolio sizing (production: 128-256)
+
+ranking:
+  model_path: "/app/models/dlrm_ranker.onnx"
+  precision: "fp16"
+  max_batch_size: 512
+  enable_dynamic_batching: true
+
+auction:
+  type: "gsp"              # gsp | vcg
+  reserve_price: 0.01
+
+pacing:
+  kp: 0.5
+  ki: 0.1
+  kd: 0.05
+  update_interval_seconds: 60
+
+streaming:
+  broker: "redpanda:29092"  # Redpanda internal broker address inside Docker network
+  consumer_group: "adapt-features"
+  topics:
+    impressions: "adapt.impressions"
+    clicks: "adapt.clicks"
+    conversions: "adapt.conversions"
+
+drift:
+  psi_threshold: 0.25
+  check_interval_seconds: 300
+  auto_rollback: true
+
+metrics:
+  prometheus_port: 9091
+
+sizing:
+  # Portfolio-scale constraints for RTX 3050 6GB
+  user_vocab: 100000
+  ad_vocab: 50000
+  embedding_dim: 64
+  training_batch_size: 512
+  candidate_pool_size: 100000
+

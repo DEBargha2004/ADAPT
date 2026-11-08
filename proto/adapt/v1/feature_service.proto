@@ -1,0 +1,31 @@
+syntax = "proto3";
+package adapt.v1;
+
+service FeatureService {
+  rpc GetFeatures(FeatureRequest) returns (FeatureResponse);
+  rpc PublishEvent(EventRecord) returns (PublishAck);
+}
+
+message FeatureRequest {
+  string entity_type = 1;   // "user" or "ad"
+  string entity_id = 2;
+  repeated string feature_names = 3;
+}
+
+message FeatureResponse {
+  map<string, double> numeric_features = 1;
+  map<string, string> categorical_features = 2;
+}
+
+message EventRecord {
+  string event_type = 1;    // "impression", "click", "conversion"
+  string user_id = 2;
+  string ad_id = 3;
+  string campaign_id = 4;
+  int64 timestamp_ms = 5;
+  double revenue = 6;
+}
+
+message PublishAck {
+  bool success = 1;
+}

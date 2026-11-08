@@ -1,0 +1,34 @@
+# ==============================================================================
+# ADAPT Streaming Consumer (Rust) Dockerfile
+# Cross-platform development image with hot reloading via cargo-watch
+# ==============================================================================
+FROM rust:1-slim-bookworm
+
+# Install build dependencies for librdkafka (cmake-build feature)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    pkg-config \
+    libssl-dev \
+    libcurl4-openssl-dev \
+    curl \
+    ca-certificates \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install cargo-binstall and precompiled cargo-watch for rapid hot-reloading
+RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash && \
+    cargo binstall --no-confirm cargo-watch
+
+WORKDIR /app
+
+# Point cargo target directory to isolated path (mounted to a named volume)
+ENV CARGO_TARGET_DIR=/app/streaming/target
+ENV RUST_LOG=info
+
+# Default development command with hot reload on file changes
+CMD ["cargo", "watch", "-c", \
+     "-w", "streaming/src", \
+     "-w", "configs", \
+     "-x", "run --manifest-path streaming/Cargo.toml --bin adapt-streaming"]
+

@@ -1,0 +1,22 @@
+# Rust
+serving/target/
+streaming/target/
+
+# Python
+ml/__pycache__/
+ml/**/__pycache__/
+ml/.venv/
+*.pyc
+
+# Models & data artifacts
+models/*.onnx
+models/*.hnsw
+ml/data/*.parquet
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
